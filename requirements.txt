@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pymysql
+cryptography
+pandas
+numpy
+scikit-learn
+tushare
