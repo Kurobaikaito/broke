@@ -1,12 +1,12 @@
 const state = {
   horizon: "20d",
-  limit: 20,
+  capital: 50000,
   minScore: "",
   items: [],
   selectedCode: null,
   currentView: "analysisView",
   syncStatus: "idle",
-  tokenConfigured: false,
+  syncDataset: "a_share_daily_full_v2",
 };
 
 const factorNames = {
@@ -84,10 +84,15 @@ async function loadBacktest() {
 }
 
 async function loadRecommendations() {
-  const params = new URLSearchParams({ horizon: state.horizon, limit: String(state.limit) });
+  const params = new URLSearchParams({ horizon: state.horizon, capital: String(state.capital), limit: "100" });
   if (state.minScore !== "") params.set("min_score", state.minScore);
   const payload = await fetchJson(`/api/recommendations?${params.toString()}`);
   state.items = payload.items || [];
+  if (payload.mode === "mysql-empty-demo-fallback") {
+    $("modeBadge").textContent = "暂无真实预测 · 当前为演示推荐";
+    $("modeBadge").style.color = "#c2410c";
+  }
+  $("resultCount").textContent = `${state.items.length}只 · 已分配${formatInteger(payload.allocated_amount)}元 · 现金${formatInteger(payload.cash_remaining)}元`;
   renderRecommendations();
   if (state.items.length > 0) {
     await selectStock(state.items[0].code);
@@ -98,9 +103,8 @@ async function loadRecommendations() {
 
 function renderRecommendations() {
   const tbody = $("recommendationBody");
-  $("resultCount").textContent = `${state.items.length}只`;
   if (state.items.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="empty">暂无结果</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="empty">当前资金下暂无可买满一手的结果</td></tr>`;
     return;
   }
   tbody.innerHTML = state.items
@@ -112,6 +116,7 @@ function renderRecommendations() {
         <td>${item.rank ?? "--"}</td><td>${escapeHtml(item.code)}</td><td>${escapeHtml(item.name)}</td>
         <td>${escapeHtml(item.industry || "未分类")}</td><td class="score">${formatNumber(item.score, 3)}</td>
         <td class="prob">${formatPercent(item.probability)}</td>
+        <td>${formatInteger(item.target_shares)}</td><td>${formatInteger(item.target_amount)}</td>
         <td><span class="${riskClass}" title="${escapeHtml(risks)}">${escapeHtml(risks)}</span></td></tr>`;
     })
     .join("");
@@ -153,27 +158,8 @@ function renderFactor(factor) {
 
 async function loadDataConfig() {
   const config = await fetchJson("/api/data/config");
-  state.tokenConfigured = config.token_configured;
-  $("tokenStatus").textContent = config.token_configured ? `已配置 · ${config.token_suffix}` : "未配置";
-  $("tokenStatus").style.color = config.token_configured ? "#11845b" : "#b42318";
-  if (!$("startDateInput").value) $("startDateInput").value = config.defaults.start_date;
-  if (!$("endDateInput").value) $("endDateInput").value = config.defaults.end_date;
-  $("sleepInput").value = config.defaults.sleep_seconds;
-  $("retryInput").value = config.defaults.retry;
-}
-
-async function saveToken() {
-  const token = $("tokenInput").value.trim();
-  if (!token) throw new Error("请输入 Token");
-  const result = await fetchJson("/api/data/token", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token }),
-  });
-  state.tokenConfigured = true;
-  $("tokenInput").value = "";
-  $("tokenStatus").textContent = `已配置 · ${result.token_suffix}`;
-  $("tokenStatus").style.color = "#11845b";
+  state.syncDataset = config.sync_dataset || state.syncDataset;
+  $("syncPolicy").textContent = `首次从 ${config.history_start} 拉取沪深历史数据；以后自动从最后成功日期继续，不包含北交所。`;
 }
 
 async function loadInventory() {
@@ -183,7 +169,8 @@ async function loadInventory() {
     ? rows.map((item) => `<tr><td>${escapeHtml(tableNames[item.table] || item.table)}</td>
       <td>${formatInteger(item.estimated_rows)}</td><td>${item.start_date || "--"}</td><td>${item.end_date || "--"}</td></tr>`).join("")
     : `<tr><td colspan="4" class="empty">暂无数据</td></tr>`;
-  const checkpoint = (inventory.states || [])[0];
+  const states = inventory.states || [];
+  const checkpoint = states.find((item) => item.dataset === state.syncDataset);
   $("dataCheckpoint").textContent = checkpoint
     ? `同步断点 ${checkpoint.last_trade_date || "--"} · ${checkpoint.status}`
     : "同步断点 --";
@@ -231,21 +218,10 @@ async function loadSyncStatus() {
   renderSyncStatus(await fetchJson("/api/data/sync/status"));
 }
 
-async function startSync(event) {
-  event.preventDefault();
+async function startSync() {
   try {
-    if ($("tokenInput").value.trim()) await saveToken();
-    if (!state.tokenConfigured) throw new Error("请先配置 Token");
-    const payload = {
-      start_date: $("startDateInput").value,
-      end_date: $("endDateInput").value || null,
-      sleep_seconds: Number($("sleepInput").value),
-      retry: Number($("retryInput").value),
-      continue_on_error: $("continueInput").checked,
-      use_checkpoint: $("checkpointInput").checked,
-    };
     renderSyncStatus(await fetchJson("/api/data/sync", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      method: "POST",
     }));
   } catch (error) {
     $("progressMessage").textContent = error.message;
@@ -267,7 +243,7 @@ async function refreshAnalysis() {
     await Promise.all([loadHealth(), loadBacktest()]);
     await loadRecommendations();
   } catch (error) {
-    $("recommendationBody").innerHTML = `<tr><td colspan="7" class="empty">请求失败</td></tr>`;
+    $("recommendationBody").innerHTML = `<tr><td colspan="9" class="empty">请求失败</td></tr>`;
     $("explainBody").innerHTML = `<p class="empty">${escapeHtml(error.message)}</p>`;
   }
 }
@@ -293,12 +269,16 @@ function bindEvents() {
     document.querySelectorAll(".segment").forEach((item) => item.classList.remove("active"));
     button.classList.add("active"); state.horizon = button.dataset.horizon; await refreshAnalysis();
   }));
-  $("limitSelect").addEventListener("change", async (event) => { state.limit = Number(event.target.value); await loadRecommendations(); });
+  $("capitalInput").addEventListener("change", async (event) => {
+    const value = Math.min(100000, Math.max(10000, Number(event.target.value) || 50000));
+    event.target.value = value;
+    state.capital = value;
+    await loadRecommendations();
+  });
   $("minScoreInput").addEventListener("change", async (event) => { state.minScore = event.target.value; await loadRecommendations(); });
   $("refreshBtn").addEventListener("click", () => state.currentView === "dataView" ? refreshData() : refreshAnalysis());
   $("inventoryRefreshBtn").addEventListener("click", loadInventory);
-  $("saveTokenBtn").addEventListener("click", () => saveToken().catch((error) => { $("tokenStatus").textContent = error.message; }));
-  $("syncForm").addEventListener("submit", startSync);
+  $("startSyncBtn").addEventListener("click", startSync);
   $("stopSyncBtn").addEventListener("click", stopSync);
 }
 

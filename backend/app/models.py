@@ -34,11 +34,10 @@ class DailyBar(Base):
     __tablename__ = "daily_bar"
     __table_args__ = (
         UniqueConstraint("code", "trade_date", name="uq_daily_bar_code_date"),
-        Index("ix_daily_bar_trade_date_code", "trade_date", "code"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(16), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     open: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
     high: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
@@ -57,11 +56,10 @@ class DailyBarAdj(Base):
     __tablename__ = "daily_bar_adj"
     __table_args__ = (
         UniqueConstraint("code", "trade_date", name="uq_daily_bar_adj_code_date"),
-        Index("ix_daily_bar_adj_trade_date_code", "trade_date", "code"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(16), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     open: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
     high: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
@@ -78,11 +76,10 @@ class AdjFactor(Base):
     __tablename__ = "adj_factor"
     __table_args__ = (
         UniqueConstraint("code", "trade_date", name="uq_adj_factor_code_date"),
-        Index("ix_adj_factor_trade_date_code", "trade_date", "code"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(16), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     adj_factor: Mapped[Decimal] = mapped_column(Numeric(24, 8), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -92,11 +89,10 @@ class DailyBasic(Base):
     __tablename__ = "daily_basic"
     __table_args__ = (
         UniqueConstraint("code", "trade_date", name="uq_daily_basic_code_date"),
-        Index("ix_daily_basic_trade_date_code", "trade_date", "code"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(16), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     pe_ttm: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
     pb: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
@@ -104,8 +100,9 @@ class DailyBasic(Base):
     total_mv: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
     float_mv: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
     turnover_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
-    is_st: Mapped[int] = mapped_column(Integer, default=0)
-    is_suspended: Mapped[int] = mapped_column(Integer, default=0)
+    # These statuses require separate historical APIs. NULL means this sync did not observe them.
+    is_st: Mapped[int | None] = mapped_column(Integer)
+    is_suspended: Mapped[int | None] = mapped_column(Integer)
     limit_status: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 

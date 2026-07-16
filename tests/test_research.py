@@ -1,4 +1,5 @@
 import unittest
+from threading import Barrier
 
 import numpy as np
 import pandas as pd
@@ -8,6 +9,7 @@ from backend.app.research.factors import FACTOR_COLUMNS, calculate_raw_factors, 
 from backend.app.research.modeling import WalkForwardConfig, build_model_panel, walk_forward_predict
 from backend.app.services.data_sources import (
     TushareClient,
+    filter_supported_market,
     normalize_ts_code,
     tushare_daily_bundle_records,
     validate_tushare_frames,
@@ -131,6 +133,66 @@ class WalkForwardModelTestCase(unittest.TestCase):
 
 
 class TushareConversionTestCase(unittest.TestCase):
+    def test_daily_endpoints_are_requested_concurrently(self):
+        barrier = Barrier(3)
+
+        class ConcurrentPro:
+            def query(self, api_name, fields="", **kwargs):
+                barrier.wait(timeout=2)
+                records = {
+                    "daily": {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "20240102",
+                        "open": 10,
+                    },
+                    "adj_factor": {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "20240102",
+                        "adj_factor": 2,
+                    },
+                    "daily_basic": {
+                        "ts_code": "000001.SZ",
+                        "trade_date": "20240102",
+                        "turnover_rate": 1,
+                    },
+                }
+                return pd.DataFrame([records[api_name]])
+
+        client = TushareClient.__new__(TushareClient)
+        client.pro = ConcurrentPro()
+
+        daily, factors, basics = client.daily_frames("20240102")
+
+        self.assertEqual((len(daily), len(factors), len(basics)), (1, 1, 1))
+
+    def test_default_page_size_uses_official_six_thousand_row_limit(self):
+        class EmptyPro:
+            def __init__(self):
+                self.limits = []
+
+            def query(self, api_name, fields="", **kwargs):
+                self.limits.append(kwargs["limit"])
+                return pd.DataFrame()
+
+        client = TushareClient.__new__(TushareClient)
+        client.pro = EmptyPro()
+
+        client.query_all("daily", "ts_code")
+
+        self.assertEqual(client.pro.limits, [6000])
+
+    def test_market_filter_excludes_beijing_rows(self):
+        frame = pd.DataFrame(
+            {
+                "ts_code": ["600000.SH", "000001.SZ", "920000.BJ"],
+                "value": [1, 2, 3],
+            }
+        )
+
+        filtered = filter_supported_market(frame)
+
+        self.assertEqual(filtered["ts_code"].tolist(), ["600000.SH", "000001.SZ"])
+
     def test_units_and_static_adjustment_are_correct(self):
         daily = pd.DataFrame(
             [

@@ -36,8 +36,7 @@ CREATE TABLE IF NOT EXISTS daily_bar (
   turnover_rate DECIMAL(12,4),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_daily_bar_code_date (code, trade_date),
-  KEY ix_daily_bar_trade_date_code (trade_date, code),
-  KEY ix_daily_bar_code (code)
+  KEY ix_daily_bar_trade_date (trade_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS daily_basic (
@@ -50,13 +49,12 @@ CREATE TABLE IF NOT EXISTS daily_basic (
   total_mv DECIMAL(24,4),
   float_mv DECIMAL(24,4),
   turnover_rate DECIMAL(12,4),
-  is_st TINYINT NOT NULL DEFAULT 0,
-  is_suspended TINYINT NOT NULL DEFAULT 0,
+  is_st TINYINT NULL,
+  is_suspended TINYINT NULL,
   limit_status TINYINT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_daily_basic_code_date (code, trade_date),
-  KEY ix_daily_basic_trade_date_code (trade_date, code),
-  KEY ix_daily_basic_code (code)
+  KEY ix_daily_basic_trade_date (trade_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS data_sync_state (
@@ -78,8 +76,7 @@ CREATE TABLE IF NOT EXISTS adj_factor (
   adj_factor DECIMAL(24,8) NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_adj_factor_code_date (code, trade_date),
-  KEY ix_adj_factor_trade_date_code (trade_date, code),
-  KEY ix_adj_factor_code (code)
+  KEY ix_adj_factor_trade_date (trade_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS daily_bar_adj (
@@ -96,8 +93,7 @@ CREATE TABLE IF NOT EXISTS daily_bar_adj (
   turnover_rate DECIMAL(12,4),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_daily_bar_adj_code_date (code, trade_date),
-  KEY ix_daily_bar_adj_trade_date_code (trade_date, code),
-  KEY ix_daily_bar_adj_code (code)
+  KEY ix_daily_bar_adj_trade_date (trade_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS factor_daily (

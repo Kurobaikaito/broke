@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
+
+
+SUPPORTED_EXCHANGES = {"SSE", "SZSE"}
+SUPPORTED_TS_CODE_SUFFIXES = (".SH", ".SZ")
 
 
 def _to_decimal(value: Any) -> Decimal | None:
@@ -41,7 +46,7 @@ class TushareClient:
         self,
         api_name: str,
         fields: str,
-        page_size: int = 5000,
+        page_size: int = 6000,
         max_pages: int = 20,
         **params: Any,
     ):
@@ -80,11 +85,14 @@ class TushareClient:
                 code = normalize_ts_code(row.get("ts_code") or row.get("symbol"))
                 if not code:
                     continue
+                exchange = normalize_tushare_exchange(row.get("exchange"), row.get("ts_code"))
+                if exchange not in SUPPORTED_EXCHANGES:
+                    continue
                 list_date = row.get("list_date")
                 records_by_code[code] = {
                     "code": code,
                     "name": str(row.get("name") or code).strip(),
-                    "exchange": normalize_tushare_exchange(row.get("exchange"), row.get("ts_code")),
+                    "exchange": exchange,
                     "industry": _optional_text(row.get("industry")),
                     "list_date": _to_date(list_date) if _optional_text(list_date) else None,
                     "status": status_map.get(str(row.get("list_status") or list_status), "unknown"),
@@ -109,22 +117,29 @@ class TushareClient:
         ]
 
     def daily_frames(self, trade_date: str):
-        daily = self.query_all(
-            "daily",
-            "ts_code,trade_date,open,high,low,close,pct_chg,vol,amount",
-            trade_date=trade_date,
+        requests = (
+            ("daily", "ts_code,trade_date,open,high,low,close,pct_chg,vol,amount"),
+            ("adj_factor", "ts_code,trade_date,adj_factor"),
+            (
+                "daily_basic",
+                "ts_code,trade_date,turnover_rate,pe_ttm,pb,ps_ttm,total_mv,circ_mv,limit_status",
+            ),
         )
-        factors = self.query_all(
-            "adj_factor",
-            "ts_code,trade_date,adj_factor",
-            trade_date=trade_date,
-        )
-        basics = self.query_all(
-            "daily_basic",
-            "ts_code,trade_date,turnover_rate,pe_ttm,pb,ps_ttm,total_mv,circ_mv,limit_status",
-            trade_date=trade_date,
-        )
-        return daily, factors, basics
+        with ThreadPoolExecutor(max_workers=3, thread_name_prefix="tushare-daily") as executor:
+            futures = [
+                executor.submit(self.query_all, api_name, fields, trade_date=trade_date)
+                for api_name, fields in requests
+            ]
+            daily, factors, basics = (future.result() for future in futures)
+        return tuple(filter_supported_market(frame) for frame in (daily, factors, basics))
+
+
+def filter_supported_market(frame):
+    """Keep Shanghai and Shenzhen instruments; Beijing-market rows are out of scope."""
+    if frame is None or frame.empty or "ts_code" not in frame.columns:
+        return frame
+    codes = frame["ts_code"].astype(str).str.upper()
+    return frame[codes.str.endswith(SUPPORTED_TS_CODE_SUFFIXES)].copy()
 
 
 def validate_tushare_frames(daily, factors, basics, expected_date: str) -> dict[str, Any]:
@@ -241,8 +256,9 @@ def tushare_daily_bundle_records(daily, factors, basics) -> dict[str, list[dict[
                     "total_mv": _scale_decimal(row.get("total_mv"), Decimal("10000")),
                     "float_mv": _scale_decimal(row.get("circ_mv"), Decimal("10000")),
                     "turnover_rate": _to_decimal(row.get("turnover_rate")),
-                    "is_st": 0,
-                    "is_suspended": 0,
+                    # ST and suspension history come from separate endpoints; do not invent false values.
+                    "is_st": None,
+                    "is_suspended": None,
                     "limit_status": _to_int(row.get("limit_status")),
                 }
             )

@@ -14,11 +14,10 @@ from backend.app.services.tushare_sync import SyncOptions, run_tushare_sync
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Incrementally sync full-market A-share data from Tushare Pro.")
-    parser.add_argument("--start-date", default=None, help="YYYYMMDD; defaults to 20260101 or the saved checkpoint")
+    parser.add_argument("--start-date", default=None, help="YYYYMMDD; defaults to 20180101 or the saved checkpoint")
     parser.add_argument("--end-date", default=date.today().strftime("%Y%m%d"))
     parser.add_argument("--codes", default=None, help="Optional comma-separated six-digit codes")
-    parser.add_argument("--refresh-days", type=int, default=7)
-    parser.add_argument("--sleep", type=float, default=0.8)
+    parser.add_argument("--sleep", type=float, default=0.0)
     parser.add_argument("--retry", type=int, default=3)
     parser.add_argument("--max-dates", type=int, default=None)
     parser.add_argument("--continue-on-error", action="store_true")
@@ -34,7 +33,6 @@ def main() -> None:
         start_date=args.start_date,
         end_date=args.end_date,
         codes=args.codes,
-        refresh_days=args.refresh_days,
         sleep_seconds=args.sleep,
         retry=args.retry,
         max_dates=args.max_dates,

@@ -31,7 +31,18 @@ def main() -> None:
     if not calendar or calendar[0]["is_open"] != 1:
         raise SystemExit(f"{args.trade_date} is not an open SSE trading date")
     daily, factors, basics = client.daily_frames(args.trade_date)
-    quality = validate_tushare_frames(daily, factors, basics, args.trade_date)
+    try:
+        quality = validate_tushare_frames(daily, factors, basics, args.trade_date)
+    except ValueError:
+        daily_codes = set(daily["ts_code"].astype(str))
+        basic_codes = set(basics["ts_code"].astype(str))
+        missing_basics = sorted(daily_codes.difference(basic_codes))
+        print(f"raw_daily_rows={len(daily)}")
+        print(f"raw_adj_factor_rows={len(factors)}")
+        print(f"raw_daily_basic_rows={len(basics)}")
+        print(f"missing_daily_basic_rows={len(missing_basics)}")
+        print(f"missing_daily_basic_sample={','.join(missing_basics[:20])}")
+        raise
     print("token_valid=true")
     print(f"stock_records={len(stocks)}")
     print(f"trade_date={args.trade_date}")

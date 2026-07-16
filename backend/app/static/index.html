@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A股研究工作台</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260715-2" />
   </head>
   <body>
     <header class="topbar">
@@ -31,12 +31,8 @@
             <button class="segment" type="button" data-horizon="60d">60日</button>
           </div>
           <label>
-            数量
-            <select id="limitSelect">
-              <option value="10">10</option>
-              <option value="20" selected>20</option>
-              <option value="50">50</option>
-            </select>
+            可用资金（元）
+            <input id="capitalInput" type="number" min="10000" max="100000" step="1000" value="50000" />
           </label>
           <label>
             最低评分
@@ -56,8 +52,8 @@
             <div class="panel-header"><h2>今日推荐</h2><span id="resultCount">0只</span></div>
             <div class="table-wrap">
               <table>
-                <thead><tr><th>排名</th><th>代码</th><th>名称</th><th>行业</th><th>评分</th><th>上涨概率</th><th>风险</th></tr></thead>
-                <tbody id="recommendationBody"><tr><td colspan="7" class="empty">加载中</td></tr></tbody>
+                <thead><tr><th>排名</th><th>代码</th><th>名称</th><th>行业</th><th>评分</th><th>上涨概率</th><th>参考股数</th><th>参考金额</th><th>风险</th></tr></thead>
+                <tbody id="recommendationBody"><tr><td colspan="9" class="empty">加载中</td></tr></tbody>
               </table>
             </div>
           </section>
@@ -76,26 +72,14 @@
 
         <section class="data-grid">
           <section class="panel sync-config-panel">
-            <div class="panel-header"><h2>Tushare 配置</h2><span id="tokenStatus">未检测</span></div>
-            <form id="syncForm" class="sync-form">
-              <label class="full-field">
-                接口 Token
-                <div class="input-action-row">
-                  <input id="tokenInput" type="password" autocomplete="off" placeholder="保留为空则使用已保存 Token" />
-                  <button id="saveTokenBtn" class="secondary-btn" type="button">保存</button>
-                </div>
-              </label>
-              <label>开始日期<input id="startDateInput" type="date" required /></label>
-              <label>结束日期<input id="endDateInput" type="date" /></label>
-              <label>Sleep 秒数<input id="sleepInput" type="number" min="0" max="60" step="0.1" value="0.8" required /></label>
-              <label>失败重试<input id="retryInput" type="number" min="1" max="10" step="1" value="3" required /></label>
-              <label class="check-field full-field"><input id="continueInput" type="checkbox" />失败后继续</label>
-              <label class="check-field full-field"><input id="checkpointInput" type="checkbox" checked />从安全断点续传</label>
+            <div class="panel-header"><h2>沪深市场全量同步</h2><span>自动断点续传</span></div>
+            <div id="syncControls" class="sync-form">
+              <p id="syncPolicy" class="full-field form-hint">首次从 2018-01-01 拉取沪深历史数据；以后自动从最后成功日期继续，不包含北交所。</p>
               <div class="form-actions full-field">
-                <button id="startSyncBtn" class="primary-btn" type="submit">启动拉取</button>
+                <button id="startSyncBtn" class="primary-btn" type="button">开始 / 继续拉取</button>
                 <button id="stopSyncBtn" class="danger-btn" type="button" disabled>停止</button>
               </div>
-            </form>
+            </div>
           </section>
 
           <section class="panel sync-progress-panel">
@@ -133,6 +117,6 @@
         </section>
       </div>
     </main>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260715-2"></script>
   </body>
 </html>

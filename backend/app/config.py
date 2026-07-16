@@ -21,27 +21,6 @@ def _load_local_env() -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-def save_tushare_token(token: str) -> None:
-    value = token.strip()
-    if len(value) < 20 or any(character.isspace() for character in value):
-        raise ValueError("Tushare token format is invalid")
-    lines = ENV_PATH.read_text(encoding="utf-8").splitlines() if ENV_PATH.exists() else []
-    updated: list[str] = []
-    replaced = False
-    for line in lines:
-        if line.strip().startswith("TUSHARE_TOKEN="):
-            updated.append(f"TUSHARE_TOKEN={value}")
-            replaced = True
-        else:
-            updated.append(line)
-    if not replaced:
-        updated.append(f"TUSHARE_TOKEN={value}")
-    temporary = ENV_PATH.with_name(".env.tmp")
-    temporary.write_text("\n".join(updated) + "\n", encoding="utf-8")
-    temporary.replace(ENV_PATH)
-    os.environ["TUSHARE_TOKEN"] = value
-
-
 def _parse_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default

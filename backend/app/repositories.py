@@ -23,6 +23,9 @@ from .models import (
 from .services.demo_data import demo_backtest_summary, demo_explanation, demo_recommendations
 
 
+DRIVER_UPSERT_BATCH_SIZE = 6000
+
+
 def _json_loads(value: str | None, fallback: Any) -> Any:
     if not value:
         return fallback
@@ -150,6 +153,7 @@ class MysqlRepository:
                 ModelPrediction.horizon == horizon,
                 ModelPrediction.trade_date == latest_date,
                 ModelPrediction.model_version == model_version,
+                DimStock.exchange.in_(("SSE", "SZSE")),
             )
             .order_by(desc(ModelPrediction.score))
             .limit(limit)
@@ -181,7 +185,11 @@ class MysqlRepository:
         stmt = (
             select(ModelPrediction, DimStock)
             .join(DimStock, DimStock.code == ModelPrediction.code, isouter=True)
-            .where(ModelPrediction.code == code, ModelPrediction.horizon == horizon)
+            .where(
+                ModelPrediction.code == code,
+                ModelPrediction.horizon == horizon,
+                DimStock.exchange.in_(("SSE", "SZSE")),
+            )
             .order_by(desc(ModelPrediction.trade_date))
             .limit(1)
         )
@@ -219,6 +227,7 @@ class MysqlRepository:
         summary = self.session.execute(stmt).scalar_one_or_none()
         if summary is None:
             return None
+        parsed_notes = _json_loads(summary.notes, {})
         return {
             "horizon": summary.horizon,
             "model_version": summary.model_version,
@@ -231,15 +240,18 @@ class MysqlRepository:
             "sharpe": _as_float(summary.sharpe),
             "rank_ic": _as_float(summary.rank_ic),
             "turnover": _as_float(summary.turnover),
-            "notes": summary.notes,
+            "initial_capital": parsed_notes.get("initial_capital") if isinstance(parsed_notes, dict) else None,
+            "ending_capital": parsed_notes.get("ending_capital") if isinstance(parsed_notes, dict) else None,
+            "notes": parsed_notes,
         }
 
     def upsert_stocks(self, records: list[dict[str, Any]]) -> int:
         if not records:
             return 0
         table = DimStock.__table__
-        for start in range(0, len(records), 1000):
-            stmt = mysql_insert(table).values(records[start : start + 1000])
+        stock_batch_size = 1000
+        for start in range(0, len(records), stock_batch_size):
+            stmt = mysql_insert(table).values(records[start : start + stock_batch_size])
             stmt = stmt.on_duplicate_key_update(
                 name=stmt.inserted.name,
                 exchange=stmt.inserted.exchange,
@@ -250,17 +262,9 @@ class MysqlRepository:
         self.session.commit()
         return len(records)
 
-    def upsert_daily_bars(self, records: list[dict[str, Any]]) -> int:
-        if not records:
-            return 0
-        table = DailyBar.__table__
+    def upsert_daily_bars(self, records: list[dict[str, Any]], commit: bool = True) -> int:
         update_columns = ("open", "high", "low", "close", "volume", "amount", "pct_chg", "turnover_rate")
-        for start in range(0, len(records), 1000):
-            stmt = mysql_insert(table).values(records[start : start + 1000])
-            stmt = stmt.on_duplicate_key_update(**{name: getattr(stmt.inserted, name) for name in update_columns})
-            self.session.execute(stmt)
-        self.session.commit()
-        return len(records)
+        return self._driver_multi_upsert(DailyBar, records, update_columns, commit=commit)
 
     def get_sync_state(self, provider: str, dataset: str, scope: str) -> DataSyncState | None:
         return self.session.get(DataSyncState, (provider, dataset, scope))
@@ -274,6 +278,7 @@ class MysqlRepository:
         last_row_count: int | None,
         status: str,
         error_message: str | None = None,
+        commit: bool = True,
     ) -> None:
         record = {
             "provider": provider,
@@ -294,15 +299,16 @@ class MysqlRepository:
             updated_at=func.now(),
         )
         self.session.execute(stmt)
-        self.session.commit()
+        if commit:
+            self.session.commit()
 
     def upsert_trade_calendar(self, records: list[dict[str, Any]]) -> int:
         return self._bulk_upsert(TradeCalendar, records, ("is_open",))
 
-    def upsert_adj_factors(self, records: list[dict[str, Any]]) -> int:
-        return self._bulk_upsert(AdjFactor, records, ("adj_factor",))
+    def upsert_adj_factors(self, records: list[dict[str, Any]], commit: bool = True) -> int:
+        return self._bulk_upsert(AdjFactor, records, ("adj_factor",), commit=commit)
 
-    def upsert_daily_basics(self, records: list[dict[str, Any]]) -> int:
+    def upsert_daily_basics(self, records: list[dict[str, Any]], commit: bool = True) -> int:
         columns = (
             "pe_ttm",
             "pb",
@@ -314,21 +320,66 @@ class MysqlRepository:
             "is_suspended",
             "limit_status",
         )
-        return self._bulk_upsert(DailyBasic, records, columns)
+        return self._bulk_upsert(DailyBasic, records, columns, commit=commit)
 
-    def upsert_adjusted_bars(self, records: list[dict[str, Any]]) -> int:
+    def upsert_adjusted_bars(self, records: list[dict[str, Any]], commit: bool = True) -> int:
         columns = ("open", "high", "low", "close", "volume", "amount", "pct_chg", "turnover_rate")
-        return self._bulk_upsert(DailyBarAdj, records, columns)
+        return self._bulk_upsert(DailyBarAdj, records, columns, commit=commit)
 
-    def _bulk_upsert(self, model, records: list[dict[str, Any]], update_columns: tuple[str, ...]) -> int:
+    def _bulk_upsert(
+        self,
+        model,
+        records: list[dict[str, Any]],
+        update_columns: tuple[str, ...],
+        commit: bool = True,
+    ) -> int:
+        return self._driver_multi_upsert(
+            model,
+            records,
+            update_columns,
+            commit=commit,
+        )
+
+    def _driver_multi_upsert(
+        self,
+        model,
+        records: list[dict[str, Any]],
+        update_columns: tuple[str, ...],
+        commit: bool = True,
+    ) -> int:
+        """Use one safely-bound MySQL multi-row statement without SQLAlchemy's giant bind graph."""
         if not records:
             return 0
         table = model.__table__
-        for start in range(0, len(records), 1000):
-            stmt = mysql_insert(table).values(records[start : start + 1000])
-            stmt = stmt.on_duplicate_key_update(
-                **{name: getattr(stmt.inserted, name) for name in update_columns}
+        bind = self.session.get_bind()
+        quote = bind.dialect.identifier_preparer.quote
+        table_columns = {column.name for column in table.columns}
+        record_keys = set(records[0])
+        if not record_keys or any(set(record) != record_keys for record in records):
+            raise ValueError("bulk records must have one consistent non-empty shape")
+        unknown_columns = record_keys.difference(table_columns)
+        if unknown_columns:
+            raise ValueError(f"unknown bulk columns: {sorted(unknown_columns)}")
+        if set(update_columns).difference(record_keys):
+            raise ValueError("bulk update columns must exist in every record")
+
+        columns = tuple(column.name for column in table.columns if column.name in record_keys)
+        row_sql = f"({','.join(['%s'] * len(columns))})"
+        column_sql = ",".join(quote(column) for column in columns)
+        update_sql = ",".join(
+            f"{quote(column)}=new.{quote(column)}" for column in update_columns
+        )
+        target = bind.dialect.identifier_preparer.format_table(table)
+        connection = self.session.connection()
+        for start in range(0, len(records), DRIVER_UPSERT_BATCH_SIZE):
+            batch = records[start : start + DRIVER_UPSERT_BATCH_SIZE]
+            values_sql = ",".join([row_sql] * len(batch))
+            statement = (
+                f"INSERT INTO {target} ({column_sql}) VALUES {values_sql} AS new "
+                f"ON DUPLICATE KEY UPDATE {update_sql}"
             )
-            self.session.execute(stmt)
-        self.session.commit()
+            parameters = tuple(record[column] for record in batch for column in columns)
+            connection.exec_driver_sql(statement, parameters)
+        if commit:
+            self.session.commit()
         return len(records)

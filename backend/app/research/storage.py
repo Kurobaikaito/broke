@@ -15,7 +15,7 @@ from ..models import BacktestSummary, FactorDaily, ModelPrediction
 
 
 def load_bars(engine: Engine, start_date: str | None = None, end_date: str | None = None) -> pd.DataFrame:
-    clauses: list[str] = []
+    clauses: list[str] = ["s.exchange IN ('SSE', 'SZSE')"]
     params: dict[str, Any] = {}
     if start_date:
         clauses.append("b.trade_date >= :start_date")

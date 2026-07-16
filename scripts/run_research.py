@@ -18,16 +18,21 @@ from backend.app.research.storage import load_bars, save_backtest_summary, save_
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Calculate factors, train rolling models, and backtest Top-N portfolios.")
+    parser = argparse.ArgumentParser(
+        description="Calculate factors, train rolling models, and backtest capital-aware portfolios."
+    )
     parser.add_argument("--start-date", default="20180101", help="First date loaded from MySQL (YYYYMMDD).")
     parser.add_argument("--end-date", default=None, help="Optional last date loaded from MySQL (YYYYMMDD).")
     parser.add_argument("--horizons", default="5,20,60", help="Comma-separated trading-day horizons.")
     parser.add_argument("--train-window-days", type=int, default=756)
     parser.add_argument("--min-train-days", type=int, default=252)
     parser.add_argument("--min-train-rows", type=int, default=1000)
-    parser.add_argument("--top-n", type=int, default=20)
+    parser.add_argument("--top-n", type=int, default=20, help="Hard cap; small-account sizing uses at most 10.")
     parser.add_argument("--min-amount", type=float, default=20_000_000.0)
-    parser.add_argument("--transaction-cost-bps", type=float, default=15.0)
+    parser.add_argument("--initial-capital", type=float, default=50_000.0)
+    parser.add_argument("--commission-bps", type=float, default=2.5)
+    parser.add_argument("--stamp-duty-bps", type=float, default=5.0)
+    parser.add_argument("--slippage-bps", type=float, default=2.5)
     parser.add_argument("--model-version", default="logistic-price-volume-v1")
     parser.add_argument("--no-save-factors", action="store_true")
     return parser.parse_args()
@@ -73,7 +78,10 @@ def main() -> None:
                 predictions,
                 horizon=horizon,
                 top_n=args.top_n,
-                transaction_cost_bps=args.transaction_cost_bps,
+                initial_capital=args.initial_capital,
+                commission_bps=args.commission_bps,
+                stamp_duty_bps=args.stamp_duty_bps,
+                slippage_bps=args.slippage_bps,
             )
         except ValueError as exc:
             print(f"horizon={horizon}d predictions={prediction_count} backtest_skipped={exc}")
@@ -86,8 +94,14 @@ def main() -> None:
             "execution": "signal at close; enter next open; exit open after H sessions",
             "purge_days": horizon + 1,
             "train_window_days": args.train_window_days,
-            "top_n": args.top_n,
-            "transaction_cost_bps_per_traded_notional": args.transaction_cost_bps,
+            "initial_capital": args.initial_capital,
+            "position_rule": "dynamic 3-10 positions; equal cash; 100-share lots; 3% cash buffer",
+            "max_positions": args.top_n,
+            "commission_bps": args.commission_bps,
+            "stamp_duty_bps_on_sell": args.stamp_duty_bps,
+            "slippage_bps_each_side": args.slippage_bps,
+            "minimum_commission": 0,
+            "ending_capital": metrics.get("ending_capital"),
             "max_drawdown_frequency": "rebalance period endpoints",
             "periods": int(metrics["periods"]),
         }

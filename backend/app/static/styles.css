@@ -508,10 +508,14 @@ tbody tr.active {
   grid-column: 1 / -1;
 }
 
-.input-action-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+.form-hint {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f5f8ff;
+  color: #526174;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .check-field {
@@ -724,10 +728,6 @@ tbody tr.active {
 
   .full-field {
     grid-column: 1;
-  }
-
-  .input-action-row {
-    grid-template-columns: 1fr;
   }
 
   .form-actions button {

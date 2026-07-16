@@ -8,29 +8,17 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import SQLAlchemyError
-from pydantic import BaseModel, Field
 
-from .config import get_settings, save_tushare_token
+from .config import get_settings
 from .db import Base, get_engine, get_session_factory
 from .repositories import DemoRepository, MysqlRepository
+from .services.portfolio import DEFAULT_CAPITAL, allocate_lot_positions, target_position_count
 from .services.sync_jobs import SyncJobManager
-from .services.tushare_sync import SyncOptions
+from .services.tushare_sync import FULL_HISTORY_START, FULL_SYNC_DATASET, SyncOptions
 
 settings = get_settings()
 sync_manager = SyncJobManager()
 
-
-class TokenUpdate(BaseModel):
-    token: str = Field(min_length=20, max_length=256)
-
-
-class DataSyncRequest(BaseModel):
-    start_date: date = date(2026, 1, 1)
-    end_date: date | None = None
-    sleep_seconds: float = Field(default=0.8, ge=0, le=60)
-    retry: int = Field(default=3, ge=1, le=10)
-    continue_on_error: bool = False
-    use_checkpoint: bool = True
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
 app.mount("/static", StaticFiles(directory=settings.static_dir), name="static")
@@ -62,7 +50,10 @@ RepositoryDep = Annotated[DemoRepository | MysqlRepository, Depends(get_reposito
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(settings.static_dir / "index.html")
+    return FileResponse(
+        settings.static_dir / "index.html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/api/health")
@@ -82,14 +73,25 @@ def health(repository: RepositoryDep):
 def recommendations(
     repository: RepositoryDep,
     horizon: str = Query("20d", pattern="^(5d|20d|60d)$"),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(100, ge=1, le=100),
     min_score: float | None = Query(None),
+    capital: float = Query(DEFAULT_CAPITAL, ge=10_000, le=100_000),
 ):
     rows = repository.recommendations(horizon=horizon, limit=limit, min_score=min_score)
+    mode = "demo" if settings.demo_mode else "mysql"
     if not rows and not settings.demo_mode:
         rows = DemoRepository().recommendations(horizon=horizon, limit=limit, min_score=min_score)
-        return {"mode": "mysql-empty-demo-fallback", "items": rows}
-    return {"mode": "demo" if settings.demo_mode else "mysql", "items": rows}
+        mode = "mysql-empty-demo-fallback"
+    items = allocate_lot_positions(rows, capital=capital)
+    allocated = sum(float(item["target_amount"]) for item in items)
+    return {
+        "mode": mode,
+        "capital": capital,
+        "target_position_count": target_position_count(capital),
+        "allocated_amount": round(allocated, 2),
+        "cash_remaining": round(capital - allocated, 2),
+        "items": items,
+    }
 
 
 @app.get("/api/stocks/{code}/explain")
@@ -120,30 +122,13 @@ def backtest_summary(
 
 @app.get("/api/data/config")
 def data_config():
-    current = get_settings()
-    token = current.tushare_token
     return {
         "provider": "tushare",
-        "token_configured": bool(token),
-        "token_suffix": token[-4:] if token else None,
-        "defaults": {
-            "start_date": "2026-01-01",
-            "end_date": date.today().isoformat(),
-            "sleep_seconds": 0.8,
-            "retry": 3,
-            "continue_on_error": False,
-            "use_checkpoint": True,
-        },
+        "markets": ["SSE", "SZSE"],
+        "history_start": f"{FULL_HISTORY_START[:4]}-{FULL_HISTORY_START[4:6]}-{FULL_HISTORY_START[6:]}",
+        "sync_dataset": FULL_SYNC_DATASET,
+        "resume_automatically": True,
     }
-
-
-@app.put("/api/data/token")
-def update_data_token(payload: TokenUpdate):
-    try:
-        save_tushare_token(payload.token)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"status": "saved", "token_configured": True, "token_suffix": payload.token[-4:]}
 
 
 @app.get("/api/data/inventory")
@@ -159,22 +144,18 @@ def data_sync_status():
 
 
 @app.post("/api/data/sync", status_code=202)
-def start_data_sync(payload: DataSyncRequest):
+def start_data_sync():
     if settings.demo_mode:
         raise HTTPException(status_code=409, detail="MySQL mode is required")
-    end_date = payload.end_date or date.today()
-    if payload.start_date > end_date:
-        raise HTTPException(status_code=422, detail="开始日期不能晚于结束日期")
     current = get_settings()
     if not current.tushare_token:
-        raise HTTPException(status_code=422, detail="请先保存 Tushare Token")
+        raise HTTPException(status_code=422, detail="项目 .env 未配置 TUSHARE_TOKEN")
     options = SyncOptions(
-        start_date=payload.start_date.strftime("%Y%m%d"),
-        end_date=end_date.strftime("%Y%m%d"),
-        sleep_seconds=payload.sleep_seconds,
-        retry=payload.retry,
-        continue_on_error=payload.continue_on_error,
-        use_checkpoint=payload.use_checkpoint,
+        end_date=date.today().strftime("%Y%m%d"),
+        sleep_seconds=0.0,
+        retry=3,
+        continue_on_error=False,
+        use_checkpoint=True,
     )
     try:
         return sync_manager.start(options, current.tushare_token)

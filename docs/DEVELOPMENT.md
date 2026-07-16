@@ -26,7 +26,7 @@ This system is for research only and does not provide investment advice.
 - Daily basic fields such as turnover, PE, PB, market cap when available.
 - Price-volume factors with daily cross-sectional normalization.
 - Rolling logistic models and out-of-sample probabilities for 5/20/60-day horizons.
-- Non-overlapping Top N walk-forward backtests with explicit transaction costs.
+- Capital-aware non-overlapping walk-forward backtests with whole-lot sizing and explicit proportional costs.
 - API endpoints for recommendations, stock explanation, backtest summary, and system status.
 - Static white/light frontend served by the backend.
 - MySQL schema and data-source adapters.
@@ -111,7 +111,7 @@ backend/app/
   research/
     factors.py            trailing factors and cross-sectional normalization
     modeling.py           labels and purged walk-forward training
-    backtest.py           Top N portfolio evaluation
+    backtest.py           capital-aware whole-lot portfolio evaluation
     storage.py            bulk MySQL research I/O
   sql/
     schema.sql            MySQL DDL
@@ -221,18 +221,21 @@ Returns stored validation metrics:
 
 Data synchronization is implemented as a shared service. The CLI runs it directly; the web API starts it in a background thread and returns immediately rather than holding a long-running HTTP request open.
 
+For each trade date, `daily`, `adj_factor`, and `daily_basic` are requested concurrently with a 6,000-row page size. Validation remains synchronous, and all four persisted datasets plus the checkpoint still commit in one ordered transaction. The 5,000-point profile does not use a fixed inter-date delay; failed requests retain exponential retry backoff.
+
+Daily persistence uses a safely parameterized PyMySQL multi-row statement (up to 6,000 rows) instead of constructing thousands of SQLAlchemy bind nodes. Each core table retains only the primary key, the idempotency key `(code, trade_date)`, and a narrow `trade_date` index; redundant `code` and `(trade_date, code)` indexes are removed by the one-time initializer. On the local 32 GB workstation, InnoDB's buffer pool is persistently configured at 2 GB. Binlog, doublewrite, and flush-at-commit durability remain enabled.
+
 `scripts/check_tushare.py` performs a read-only token, permission, pagination, and one-date quality check. `sync_tushare.py` stops at the first failed date by default so an incremental checkpoint cannot skip a historical gap.
 
 ### Data management API
 
-- `GET /api/data/config`: provider, masked token state, and UI defaults. The token itself is never returned.
-- `PUT /api/data/token`: validates and atomically writes the local ignored `.env` token.
+- `GET /api/data/config`: provider, full-history start, and checkpoint policy. Token state and token contents are not returned.
 - `GET /api/data/inventory`: estimated table rows, date bounds, and durable checkpoints.
 - `POST /api/data/sync`: starts one background task and returns HTTP 202.
 - `POST /api/data/sync/stop`: requests cooperative cancellation after the active provider/database operation.
 - `GET /api/data/sync/status`: progress percentage, current date, row totals, failures, timestamps, and bounded logs.
 
-The web defaults are `2026-01-01` through the current date, Sleep `0.8`, three retries, and safe-checkpoint resume. Resume clamps the effective start to the later of the requested start or checkpoint minus seven calendar days. The service must bind to `127.0.0.1`; the local Token management API is not designed for public exposure.
+The web UI does not accept a date range or a Token. A new Shanghai/Shenzhen history job starts at `2018-01-01` and runs through the current date; Beijing-market instruments are excluded at ingestion and research-query boundaries. The Token is read only from the project `.env`. All tables for one market date and its checkpoint commit in one database transaction. Completion, failure, cooperative stop, or process termination can therefore resume from the next safe calendar date.
 
 ## 9. Frontend Design
 
@@ -274,7 +277,7 @@ Frontend implementation is static HTML/CSS/JavaScript to keep the MVP simple and
 ### Phase 3: Backtest (implemented)
 
 - Generate forward labels.
-- Validate Top N and top quantile portfolios.
+- Validate capital-aware ranked portfolios and top quantiles.
 - Store backtest summary.
 
 ### Phase 4: Model Upgrade (baseline implemented)
@@ -303,6 +306,8 @@ Frontend implementation is static HTML/CSS/JavaScript to keep the MVP simple and
 - Tushare stock lists include current, paused, pending, and delisted statuses, reducing survivorship bias. Exact historical universe membership still requires listing/delisting-date filters during each cross section.
 - The current Tushare path does not yet populate point-in-time ST intervals. Suspensions are handled conservatively through missing exact trading-day prices, but historical ST filtering needs a dated status source.
 - Daily bars cannot prove whether an order at a sealed limit-up/limit-down price would have filled. Accurate fill simulation requires limit-state or finer-grained data.
+- For accounts between CNY 10,000 and CNY 100,000, recommendations scale from three to ten positions, use 100-share lots, skip unaffordable first lots, and retain a 3% cash buffer.
+- The capital-aware backtest applies proportional commission without a minimum fee, sell-side stamp duty, and slippage.
 - The stored maximum drawdown uses rebalance-period endpoints. Intraperiod daily mark-to-market drawdown is a later extension.
 - Price-volume factors are implemented now. Point-in-time fundamentals must not be added until announcement dates and revision history are available.
 
