@@ -125,6 +125,18 @@ class SyncJobManager:
             self._append_log("收到停止请求")
             return self.snapshot()
 
+    def shutdown(self, timeout: float = 10.0) -> None:
+        """Cooperatively stop an in-process sync thread during app shutdown."""
+        with self._lock:
+            thread = self._thread
+            if not thread or not thread.is_alive():
+                return
+            self._stop_event.set()
+            self._state["status"] = "stopping"
+            self._state["message"] = "服务退出，正在停止同步任务"
+        if thread is not threading.current_thread():
+            thread.join(timeout=timeout)
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             payload = dict(self._state)

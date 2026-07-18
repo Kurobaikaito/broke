@@ -156,6 +156,30 @@ class ModelPrediction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class ResearchModelRun(Base):
+    """Append-only completed model/backtest run and atomic serving pointer."""
+
+    __tablename__ = "research_model_run"
+    __table_args__ = (
+        Index("ix_research_model_run_serving", "horizon", "status", "is_serving", "completed_at"),
+    )
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    horizon: Mapped[str] = mapped_column(String(16), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    prediction_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="completed")
+    is_serving: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    prediction_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    latest_prediction_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    config_json: Mapped[str] = mapped_column(Text, nullable=False)
+    metrics_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    completed_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class BacktestSummary(Base):
     __tablename__ = "backtest_summary"
     __table_args__ = (
@@ -176,3 +200,18 @@ class BacktestSummary(Base):
     turnover: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class DataMaintenanceRun(Base):
+    """Small, time-bounded audit trail for destructive lifecycle maintenance."""
+
+    __tablename__ = "data_maintenance_run"
+    __table_args__ = (Index("ix_data_maintenance_run_started_at", "started_at"),)
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, default="apply")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+    report_json: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)

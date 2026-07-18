@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import desc, func, select, text
+from sqlalchemy import desc, func, inspect, select, text
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.orm import Session
 
@@ -18,8 +18,10 @@ from .models import (
     DataSyncState,
     DimStock,
     ModelPrediction,
+    ResearchModelRun,
     TradeCalendar,
 )
+from .services.data_governance import DataGovernanceService
 from .services.demo_data import demo_backtest_summary, demo_explanation, demo_recommendations
 
 
@@ -79,54 +81,34 @@ class MysqlRepository:
         return {"database": "mysql", "ok": True}
 
     def data_inventory(self) -> dict[str, Any]:
-        table_names = ("daily_bar", "daily_bar_adj", "adj_factor", "daily_basic")
-        estimates = {
-            table_name: int(table_rows or 0)
-            for table_name, table_rows in self.session.execute(
-                text(
-                    """
-                    SELECT table_name, table_rows
-                    FROM information_schema.tables
-                    WHERE table_schema = DATABASE()
-                      AND table_name IN ('daily_bar', 'daily_bar_adj', 'adj_factor', 'daily_basic')
-                    """
-                )
-            ).all()
-        }
-        inventory = []
-        for table_name in table_names:
-            bounds = self.session.execute(
-                text(f"SELECT MIN(trade_date) AS min_date, MAX(trade_date) AS max_date FROM {table_name}")
-            ).one()
-            inventory.append(
-                {
-                    "table": table_name,
-                    "estimated_rows": estimates.get(table_name, 0),
-                    "start_date": bounds.min_date.isoformat() if bounds.min_date else None,
-                    "end_date": bounds.max_date.isoformat() if bounds.max_date else None,
-                }
+        service = DataGovernanceService(self.session.get_bind())
+        return service.inventory(self.session)
+
+    def _has_published_runs(self) -> bool:
+        return inspect(self.session.get_bind()).has_table(ResearchModelRun.__tablename__)
+
+    def serving_model_run(self, horizon: str) -> ResearchModelRun | None:
+        if not self._has_published_runs():
+            return None
+        return self.session.execute(
+            select(ResearchModelRun)
+            .where(
+                ResearchModelRun.horizon == horizon,
+                ResearchModelRun.status == "completed",
+                ResearchModelRun.is_serving == 1,
             )
-        states = self.session.execute(
-            select(DataSyncState).order_by(desc(DataSyncState.updated_at))
-        ).scalars()
-        return {
-            "tables": inventory,
-            "states": [
-                {
-                    "provider": state.provider,
-                    "dataset": state.dataset,
-                    "scope": state.scope,
-                    "last_trade_date": state.last_trade_date.isoformat() if state.last_trade_date else None,
-                    "last_row_count": state.last_row_count,
-                    "status": state.status,
-                    "error_message": state.error_message,
-                    "updated_at": state.updated_at.isoformat() if state.updated_at else None,
-                }
-                for state in states
-            ],
-        }
+            .order_by(desc(ResearchModelRun.completed_at), desc(ResearchModelRun.created_at))
+            .limit(1)
+        ).scalar_one_or_none()
 
     def latest_prediction_run(self, horizon: str) -> tuple[date, str] | None:
+        if self._has_published_runs():
+            published_run = self.serving_model_run(horizon)
+            # Once the publication table exists, never infer serving from raw
+            # prediction timestamps: an empty pointer means no completed run.
+            if published_run is None:
+                return None
+            return published_run.prediction_date, published_run.model_version
         stmt = (
             select(ModelPrediction.trade_date, ModelPrediction.model_version)
             .where(ModelPrediction.horizon == horizon)
@@ -140,6 +122,13 @@ class MysqlRepository:
         if latest_run is None:
             return []
         latest_date, model_version = latest_run
+        published_run = self.serving_model_run(horizon)
+        published_config = _json_loads(published_run.config_json, {}) if published_run else {}
+        strategy_version = (
+            published_config.get("strategy_version", model_version)
+            if isinstance(published_config, dict)
+            else model_version
+        )
 
         stmt = (
             select(ModelPrediction, DimStock, DailyBar.close)
@@ -177,20 +166,35 @@ class MysqlRepository:
                     "factor_highlights": _factor_highlights(prediction.factor_snapshot),
                     "factor_snapshot": _json_loads(prediction.factor_snapshot, {}),
                     "risk_flags": _json_loads(prediction.risk_flags, []),
+                    "run_id": published_run.run_id if published_run else None,
+                    "model_version": strategy_version,
+                    "publication_version": model_version,
                 }
             )
         return rows
 
     def stock_explanation(self, code: str, horizon: str) -> dict[str, Any] | None:
+        latest_run = self.latest_prediction_run(horizon)
+        if latest_run is None:
+            return None
+        latest_date, model_version = latest_run
+        published_run = self.serving_model_run(horizon)
+        published_config = _json_loads(published_run.config_json, {}) if published_run else {}
+        strategy_version = (
+            published_config.get("strategy_version", model_version)
+            if isinstance(published_config, dict)
+            else model_version
+        )
         stmt = (
             select(ModelPrediction, DimStock)
             .join(DimStock, DimStock.code == ModelPrediction.code, isouter=True)
             .where(
                 ModelPrediction.code == code,
                 ModelPrediction.horizon == horizon,
+                ModelPrediction.trade_date == latest_date,
+                ModelPrediction.model_version == model_version,
                 DimStock.exchange.in_(("SSE", "SZSE")),
             )
-            .order_by(desc(ModelPrediction.trade_date))
             .limit(1)
         )
         row = self.session.execute(stmt).first()
@@ -213,11 +217,45 @@ class MysqlRepository:
         }
         return {
             "prediction": recommendation,
-            "method": prediction.model_version,
+            "method": strategy_version,
+            "publication_version": prediction.model_version,
+            "run_id": published_run.run_id if published_run else None,
             "notes": ["读取自 MySQL model_prediction 表。"],
         }
 
     def backtest_summary(self, horizon: str) -> dict[str, Any] | None:
+        published_run = None
+        publication_table_exists = self._has_published_runs()
+        if publication_table_exists:
+            published_run = self.serving_model_run(horizon)
+            if published_run is None:
+                return None
+        if published_run is not None:
+            metrics = _json_loads(published_run.metrics_json, {})
+            config = _json_loads(published_run.config_json, {})
+            strategy_version = (
+                config.get("strategy_version", published_run.model_version)
+                if isinstance(config, dict)
+                else published_run.model_version
+            )
+            return {
+                "horizon": published_run.horizon,
+                "model_version": strategy_version,
+                "publication_version": published_run.model_version,
+                "run_id": published_run.run_id,
+                "start_date": published_run.start_date.isoformat(),
+                "end_date": published_run.end_date.isoformat(),
+                "top_group_return": metrics.get("top_group_return"),
+                "benchmark_return": metrics.get("benchmark_return"),
+                "win_rate": metrics.get("win_rate"),
+                "max_drawdown": metrics.get("max_drawdown"),
+                "sharpe": metrics.get("sharpe"),
+                "rank_ic": metrics.get("rank_ic"),
+                "turnover": metrics.get("turnover"),
+                "initial_capital": config.get("initial_capital"),
+                "ending_capital": metrics.get("ending_capital"),
+                "notes": config,
+            }
         stmt = (
             select(BacktestSummary)
             .where(BacktestSummary.horizon == horizon)

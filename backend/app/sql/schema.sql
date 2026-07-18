@@ -126,6 +126,24 @@ CREATE TABLE IF NOT EXISTS model_prediction (
   KEY ix_model_prediction_code_date (code, trade_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS research_model_run (
+  run_id VARCHAR(36) PRIMARY KEY,
+  horizon VARCHAR(16) NOT NULL,
+  model_version VARCHAR(64) NOT NULL,
+  prediction_date DATE NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'completed',
+  is_serving TINYINT NOT NULL DEFAULT 1,
+  prediction_count INT NOT NULL,
+  latest_prediction_count INT NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  config_json TEXT NOT NULL,
+  metrics_json TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY ix_research_model_run_serving (horizon, status, is_serving, completed_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS backtest_summary (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   horizon VARCHAR(16) NOT NULL,
@@ -142,4 +160,15 @@ CREATE TABLE IF NOT EXISTS backtest_summary (
   notes TEXT,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_backtest_summary (horizon, model_version, start_date, end_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS data_maintenance_run (
+  run_id VARCHAR(36) PRIMARY KEY,
+  mode VARCHAR(16) NOT NULL DEFAULT 'apply',
+  status VARCHAR(16) NOT NULL DEFAULT 'running',
+  started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  finished_at DATETIME NULL,
+  report_json TEXT,
+  error_message TEXT,
+  KEY ix_data_maintenance_run_started_at (started_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

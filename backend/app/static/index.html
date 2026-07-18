@@ -4,31 +4,52 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A股研究工作台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260715-2" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260716-navigation-v3" />
   </head>
   <body>
     <header class="topbar">
       <div class="brand-block">
         <h1>A股研究工作台</h1>
-        <p id="tradeMeta">--</p>
+        <p>因子研究 · 模型选股 · 数据治理</p>
       </div>
       <nav class="main-tabs" aria-label="主导航">
-        <button class="main-tab active" type="button" data-view="analysisView">选股分析</button>
-        <button class="main-tab" type="button" data-view="dataView">数据管理</button>
+        <button class="main-tab active" type="button" data-view="analysisView" aria-current="page">
+          <span>选股结果</span><small>组合与依据</small>
+        </button>
+        <button class="main-tab" type="button" data-view="researchView">
+          <span>研究中心</span><small>因子与模型</small>
+        </button>
+        <button class="main-tab" type="button" data-view="dataView">
+          <span>数据中心</span><small>同步与存储</small>
+        </button>
       </nav>
       <div class="status-group">
         <span id="modeBadge" class="badge">连接中</span>
-        <button id="refreshBtn" class="primary-btn" type="button">刷新</button>
+        <button id="refreshBtn" class="primary-btn" type="button">刷新本页</button>
       </div>
     </header>
 
     <main class="layout">
       <div id="analysisView" class="view">
+        <div class="page-heading page-heading-with-actions">
+          <div>
+            <span class="page-eyebrow">决策工作区</span>
+            <h2>选股结果</h2>
+            <p id="tradeMeta">选择预测周期和资金预算，查看组合建议与每只股票的因子依据。</p>
+          </div>
+          <div class="page-actions">
+            <span id="analysisSourceBadge" class="source-badge">推荐来源检查中</span>
+            <button class="secondary-btn view-jump-btn" type="button" data-jump-view="researchView">更新模型与推荐</button>
+          </div>
+        </div>
         <section class="toolbar" aria-label="筛选条件">
-          <div class="segmented" role="tablist" aria-label="预测周期">
-            <button class="segment active" type="button" data-horizon="5d">5日</button>
-            <button class="segment" type="button" data-horizon="20d">20日</button>
-            <button class="segment" type="button" data-horizon="60d">60日</button>
+          <div class="filter-group">
+            <span class="filter-label">预测周期</span>
+            <div class="segmented" role="group" aria-label="预测周期">
+              <button class="segment" type="button" data-horizon="5d" aria-pressed="false">5日</button>
+              <button class="segment active" type="button" data-horizon="20d" aria-pressed="true">20日</button>
+              <button class="segment" type="button" data-horizon="60d" aria-pressed="false">60日</button>
+            </div>
           </div>
           <label>
             可用资金（元）
@@ -41,40 +62,116 @@
         </section>
 
         <section class="kpi-grid" aria-label="回测摘要">
-          <article class="metric"><span>Top组收益</span><strong id="topReturn">--</strong></article>
-          <article class="metric"><span>基准收益</span><strong id="benchmarkReturn">--</strong></article>
-          <article class="metric"><span>胜率</span><strong id="winRate">--</strong></article>
-          <article class="metric"><span>Rank IC</span><strong id="rankIc">--</strong></article>
+          <article class="metric"><span>历史 Top 组收益</span><strong id="topReturn">--</strong></article>
+          <article class="metric"><span>同期基准收益</span><strong id="benchmarkReturn">--</strong></article>
+          <article class="metric"><span>历史胜率</span><strong id="winRate">--</strong></article>
+          <article class="metric"><span>因子 Rank IC</span><strong id="rankIc">--</strong></article>
         </section>
 
         <section class="content-grid">
           <section class="panel recommendations-panel">
-            <div class="panel-header"><h2>今日推荐</h2><span id="resultCount">0只</span></div>
+            <div class="panel-header"><div><h2>组合建议</h2><p>按评分排序并根据资金预算分配整手股数</p></div><span id="resultCount">0只</span></div>
             <div class="table-wrap">
               <table>
-                <thead><tr><th>排名</th><th>代码</th><th>名称</th><th>行业</th><th>评分</th><th>上涨概率</th><th>参考股数</th><th>参考金额</th><th>风险</th></tr></thead>
-                <tbody id="recommendationBody"><tr><td colspan="9" class="empty">加载中</td></tr></tbody>
+                <thead><tr><th>排名</th><th>代码</th><th>名称</th><th>行业</th><th>评分</th><th>上涨概率</th><th>参考股数</th><th>参考金额</th><th>风险</th><th class="action-column">走势</th></tr></thead>
+                <tbody id="recommendationBody"><tr><td colspan="10" class="empty">加载中</td></tr></tbody>
               </table>
             </div>
           </section>
           <aside class="panel explain-panel">
-            <div class="panel-header"><h2>个股解释</h2><span id="selectedCode">--</span></div>
+            <div class="panel-header"><div><h2>入选依据</h2><p>点击左侧股票切换解释，点击名称查看走势</p></div><span id="selectedCode">--</span></div>
             <div id="explainBody" class="explain-body"><p class="empty">选择一只股票</p></div>
           </aside>
         </section>
       </div>
 
+      <div id="researchView" class="view" hidden>
+        <div class="page-heading page-heading-with-actions">
+          <div>
+            <span class="page-eyebrow">模型生产区</span>
+            <h2>研究中心</h2>
+            <p id="researchDataCheckpoint">先确认数据已同步，再计算因子、滚动训练并发布最新推荐。</p>
+          </div>
+          <div class="page-actions">
+            <button class="secondary-btn view-jump-btn" type="button" data-jump-view="dataView">检查数据</button>
+            <button class="secondary-btn view-jump-btn" type="button" data-jump-view="analysisView">查看选股结果</button>
+          </div>
+        </div>
+
+        <section class="workflow-grid" aria-label="推荐生成流程">
+          <article class="workflow-step">
+            <span class="workflow-number">1</span>
+            <div><strong>准备市场数据</strong><p>日线、复权因子与每日指标完整可用</p></div>
+            <span id="researchSyncStatus" class="workflow-state">检查中</span>
+          </article>
+          <article class="workflow-step">
+            <span class="workflow-number">2</span>
+            <div><strong>因子与滚动模型</strong><p>首次完整回测，后续配置一致时自动增量更新</p></div>
+            <span class="workflow-state">自动</span>
+          </article>
+          <article class="workflow-step">
+            <span class="workflow-number">3</span>
+            <div><strong>验证后发布</strong><p>每个周期验证成功后安全切换对应推荐，失败则保留旧快照</p></div>
+            <span class="workflow-state">受保护</span>
+          </article>
+        </section>
+
+        <section class="panel research-panel" aria-label="研究计算与推荐发布">
+          <div class="panel-header">
+            <div><h2>自动更新最新推荐</h2><p>首次执行完整回测，后续自动选择增量更新；任务期间可以离开本页</p></div>
+            <span id="researchStatusBadge" class="status-text">空闲</span>
+          </div>
+          <div class="research-content">
+            <div class="research-controls">
+              <p class="form-hint">自动模式会检查已发布的同配置基线：首次执行或配置变化时完整回测，配置一致时只训练最新窗口；每个周期验证成功后安全切换对应推荐，失败不会污染旧快照。</p>
+              <div class="research-meta-cards">
+                <label class="research-capital-field">
+                  <span>回测与组合资金（元）</span>
+                  <input id="researchCapitalInput" type="number" min="10000" max="100000" step="1000" value="50000" />
+                </label>
+                <div><span>当前资金</span><strong id="researchCapitalText">50,000元</strong></div>
+                <div><span>预测周期</span><strong>5 / 20 / 60日</strong></div>
+                <div><span>因子规模</span><strong>15个</strong></div>
+              </div>
+              <div class="form-actions research-actions">
+                <button id="startResearchBtn" class="primary-btn" type="button">自动更新并发布</button>
+                <button id="forceFullResearchBtn" class="secondary-btn" type="button">强制完整回测</button>
+                <button id="stopResearchBtn" class="danger-btn" type="button" disabled>停止任务</button>
+              </div>
+            </div>
+            <div class="research-progress">
+              <div class="progress-summary"><strong id="researchProgressPercent">0%</strong><span id="researchMessage">暂无研究计算任务</span></div>
+              <div id="researchProgressTrack" class="progress-track" role="progressbar" aria-label="研究计算进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="researchProgressBar"></span></div>
+              <div class="progress-meta">
+                <span>运行方式 <strong id="researchRunModeText">自动判断</strong></span>
+                <span>当前步骤 <strong id="researchCurrentStepText">--</strong> · <strong id="researchStepProgress">0 / 0</strong></span>
+                <span>滚动窗口 <strong id="researchWindowProgress">0 / 0</strong></span>
+                <span>已完成周期 <strong id="researchHorizonProgress">0 / 0</strong></span>
+                <span>任务 <strong id="researchJobIdText">--</strong></span>
+              </div>
+              <div id="researchLogs" class="sync-logs research-logs"><p class="empty">暂无日志</p></div>
+            </div>
+          </div>
+        </section>
+      </div>
+
       <div id="dataView" class="view" hidden>
-        <div class="page-heading">
-          <div><h2>数据管理</h2><p id="dataCheckpoint">同步断点 --</p></div>
+        <div class="page-heading page-heading-with-actions">
+          <div><span class="page-eyebrow">数据基础设施</span><h2>数据中心</h2><p id="dataCheckpoint">同步断点 --</p></div>
           <button id="inventoryRefreshBtn" class="secondary-btn" type="button">刷新存量</button>
         </div>
 
         <section class="data-grid">
           <section class="panel sync-config-panel">
-            <div class="panel-header"><h2>沪深市场全量同步</h2><span>自动断点续传</span></div>
+            <div class="panel-header"><div><h2>市场数据同步</h2><p>负责原始行情与研究输入，不在这里运行模型</p></div><span>自动断点续传</span></div>
             <div id="syncControls" class="sync-form">
               <p id="syncPolicy" class="full-field form-hint">首次从 2018-01-01 拉取沪深历史数据；以后自动从最后成功日期继续，不包含北交所。</p>
+              <div class="data-scope-grid full-field" aria-label="同步数据范围">
+                <div><span>01</span><strong>股票主数据</strong><small>代码、名称、行业与上市状态</small></div>
+                <div><span>02</span><strong>交易日历</strong><small>识别交易日与行情缺口</small></div>
+                <div><span>03</span><strong>日线与复权</strong><small>开高低收、成交量与复权因子</small></div>
+                <div><span>04</span><strong>每日指标</strong><small>估值、市值、换手与流动性输入</small></div>
+              </div>
               <div class="form-actions full-field">
                 <button id="startSyncBtn" class="primary-btn" type="button">开始 / 继续拉取</button>
                 <button id="stopSyncBtn" class="danger-btn" type="button" disabled>停止</button>
@@ -83,10 +180,10 @@
           </section>
 
           <section class="panel sync-progress-panel">
-            <div class="panel-header"><h2>拉取进度</h2><span id="syncStatusBadge" class="status-text">空闲</span></div>
+            <div class="panel-header"><div><h2>同步进度</h2><p>可以安全停止，下一次会从断点继续</p></div><span id="syncStatusBadge" class="status-text">空闲</span></div>
             <div class="progress-content">
               <div class="progress-summary"><strong id="progressPercent">0%</strong><span id="progressMessage">暂无运行中的任务</span></div>
-              <div class="progress-track" aria-label="同步进度"><span id="progressBar"></span></div>
+              <div id="syncProgressTrack" class="progress-track" role="progressbar" aria-label="同步进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="progressBar"></span></div>
               <div class="progress-meta">
                 <span>当前日期 <strong id="currentSyncDate">--</strong></span>
                 <span>交易日 <strong id="dateProgress">0 / 0</strong></span>
@@ -102,21 +199,98 @@
         </section>
 
         <section class="panel inventory-panel">
-          <div class="panel-header"><h2>数据存量</h2><span>MySQL 估算行数</span></div>
+          <div class="panel-header"><div><h2>数据存量与生命周期</h2><p>区分永久数据、定期清理数据与可重建结果</p></div><span>存储治理</span></div>
+          <div class="inventory-summary" aria-label="数据存量摘要">
+            <div><span>估算总行数</span><strong id="inventoryRowCount">--</strong></div>
+            <div><span>数据表</span><strong id="inventoryTableCount">--</strong></div>
+            <div><span>永久保留</span><strong id="inventoryPermanentCount">--</strong></div>
+            <div><span>定期清理</span><strong id="inventoryRetainedCount">--</strong></div>
+          </div>
           <div class="table-wrap">
             <table class="inventory-table">
-              <thead><tr><th>数据表</th><th>估算行数</th><th>开始日期</th><th>结束日期</th></tr></thead>
-              <tbody id="inventoryBody"><tr><td colspan="4" class="empty">加载中</td></tr></tbody>
+              <thead><tr><th>数据表</th><th>分类</th><th>估算行数</th><th>开始日期</th><th>结束日期</th><th>保留</th></tr></thead>
+              <tbody id="inventoryBody"><tr><td colspan="6" class="empty">加载中</td></tr></tbody>
             </table>
           </div>
         </section>
 
         <section class="panel log-panel">
-          <div class="panel-header"><h2>任务日志</h2><span id="jobIdText">--</span></div>
+          <div class="panel-header"><div><h2>同步日志</h2><p>仅保留当前进程的近期运行记录</p></div><span id="jobIdText">--</span></div>
           <div id="syncLogs" class="sync-logs"><p class="empty">暂无日志</p></div>
         </section>
       </div>
+
+      <div id="stockDetailView" class="view stock-detail-view" hidden>
+        <section class="detail-navigation" aria-label="个股详情导航">
+          <button id="backToAnalysisBtn" class="back-btn" type="button" aria-label="返回选股结果">
+            <span aria-hidden="true">&larr;</span> 返回选股结果
+          </button>
+          <div class="range-switch" role="group" aria-label="K线时间范围">
+            <button class="range-btn" type="button" data-detail-limit="60">60日</button>
+            <button class="range-btn active" type="button" data-detail-limit="120">120日</button>
+            <button class="range-btn" type="button" data-detail-limit="250">250日</button>
+          </div>
+        </section>
+
+        <section class="panel stock-overview-panel" aria-labelledby="detailStockName">
+          <div class="stock-overview">
+            <div class="stock-identity">
+              <div class="stock-heading-line">
+                <h2 id="detailStockName">--</h2>
+                <span id="detailStockCode" class="stock-code-chip">--</span>
+                <span id="detailIndustry" class="industry-chip">--</span>
+              </div>
+              <p id="detailTradeDate">最新交易日 --</p>
+            </div>
+            <div class="price-summary">
+              <strong id="detailLastClose">--</strong>
+              <span id="detailChange">--</span>
+            </div>
+            <span id="detailDataMode" class="detail-mode-badge" hidden></span>
+          </div>
+          <div id="detailMetrics" class="detail-metrics" aria-label="个股核心指标">
+            <div><span>开盘</span><strong>--</strong></div>
+            <div><span>最高</span><strong>--</strong></div>
+            <div><span>最低</span><strong>--</strong></div>
+            <div><span>成交量</span><strong>--</strong></div>
+            <div><span>成交额</span><strong>--</strong></div>
+            <div><span>换手率</span><strong>--</strong></div>
+            <div><span>PE(TTM)</span><strong>--</strong></div>
+            <div><span>PB</span><strong>--</strong></div>
+            <div><span>总市值</span><strong>--</strong></div>
+            <div><span>流通市值</span><strong>--</strong></div>
+          </div>
+        </section>
+
+        <section class="panel chart-panel" aria-labelledby="chartTitle">
+          <div class="panel-header chart-header">
+            <div>
+              <h2 id="chartTitle">日K线与成交量</h2>
+              <p id="chartLegend" class="chart-legend" aria-live="polite">悬停图表查看每日开高低收</p>
+            </div>
+            <div class="chart-key" aria-label="图表图例">
+              <span class="key-up">涨</span><span class="key-down">跌</span>
+              <span class="key-ma5">MA5</span><span class="key-ma10">MA10</span><span class="key-ma20">MA20</span>
+            </div>
+          </div>
+          <div class="chart-stage">
+            <div id="stockChart" class="stock-chart" role="img" aria-label="股票日K线和成交量交互图"></div>
+            <div id="detailChartState" class="chart-state" role="status" aria-live="polite">
+              <div class="loading-spinner" aria-hidden="true"></div>
+              <strong id="detailStateTitle">正在加载行情</strong>
+              <p id="detailStateMessage">正在读取K线与核心指标…</p>
+              <button id="retryDetailBtn" class="secondary-btn" type="button" hidden>重试</button>
+            </div>
+          </div>
+          <footer class="chart-source">
+            图表由
+            <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">TradingView Lightweight Charts™</a>
+            提供技术支持。数据仅供研究，不构成投资建议。
+          </footer>
+        </section>
+      </div>
     </main>
-    <script src="/static/app.js?v=20260715-2"></script>
+    <script src="/static/vendor/lightweight-charts.standalone.production.js?v=5.2.0"></script>
+    <script src="/static/app.js?v=20260716-research-progress-v3"></script>
   </body>
 </html>

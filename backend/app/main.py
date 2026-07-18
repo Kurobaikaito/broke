@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from datetime import date
+import threading
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -13,14 +14,18 @@ from .config import get_settings
 from .db import Base, get_engine, get_session_factory
 from .repositories import DemoRepository, MysqlRepository
 from .services.portfolio import DEFAULT_CAPITAL, allocate_lot_positions, target_position_count
+from .services.research_jobs import ResearchJobManager, ResearchRunOptions
+from .services.stock_detail import get_stock_detail
 from .services.sync_jobs import SyncJobManager
 from .services.tushare_sync import FULL_HISTORY_START, FULL_SYNC_DATASET, SyncOptions
 
 settings = get_settings()
 sync_manager = SyncJobManager()
+research_manager = ResearchJobManager()
+job_start_lock = threading.RLock()
 
 
-app = FastAPI(title=settings.app_name, version="0.1.0")
+app = FastAPI(title=settings.app_name, version="0.2.0")
 app.mount("/static", StaticFiles(directory=settings.static_dir), name="static")
 
 
@@ -30,6 +35,12 @@ def startup() -> None:
         from . import models  # noqa: F401
 
         Base.metadata.create_all(bind=get_engine())
+
+
+@app.on_event("shutdown")
+def shutdown() -> None:
+    research_manager.shutdown()
+    sync_manager.shutdown()
 
 
 def get_repository() -> Generator[DemoRepository | MysqlRepository, None, None]:
@@ -108,6 +119,24 @@ def stock_explanation(
     return explanation
 
 
+@app.get("/api/stocks/{code}/detail")
+def stock_detail(
+    code: str,
+    repository: RepositoryDep,
+    limit: int = Query(120, ge=60, le=250),
+):
+    if limit not in {60, 120, 250}:
+        raise HTTPException(status_code=422, detail="limit must be one of 60, 120, or 250")
+    detail = get_stock_detail(repository, code=code, limit=limit)
+    if detail is None and not settings.demo_mode:
+        detail = get_stock_detail(DemoRepository(), code=code, limit=limit)
+        if detail is not None:
+            detail["mode"] = "mysql-empty-demo-fallback"
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Stock {code} not found")
+    return detail
+
+
 @app.get("/api/backtest/summary")
 def backtest_summary(
     repository: RepositoryDep,
@@ -158,7 +187,10 @@ def start_data_sync():
         use_checkpoint=True,
     )
     try:
-        return sync_manager.start(options, current.tushare_token)
+        with job_start_lock:
+            if research_manager.snapshot()["status"] in {"running", "stopping"}:
+                raise RuntimeError("研究计算进行中，请完成或停止后再同步数据")
+            return sync_manager.start(options, current.tushare_token)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -167,5 +199,36 @@ def start_data_sync():
 def stop_data_sync():
     try:
         return sync_manager.stop()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/research/status")
+def research_status():
+    return research_manager.snapshot()
+
+
+@app.post("/api/research/run", status_code=202)
+def start_research(
+    capital: float = Query(DEFAULT_CAPITAL, ge=10_000, le=100_000),
+    mode: Annotated[str, Query(pattern="^(auto|full|latest)$")] = "auto",
+):
+    if settings.demo_mode:
+        raise HTTPException(status_code=409, detail="MySQL mode is required")
+    try:
+        with job_start_lock:
+            if sync_manager.snapshot()["status"] in {"running", "stopping"}:
+                raise RuntimeError("数据同步进行中，请完成或停止后再运行研究")
+            return research_manager.start(
+                ResearchRunOptions(initial_capital=capital, run_mode=mode)
+            )
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/research/stop", status_code=202)
+def stop_research():
+    try:
+        return research_manager.stop()
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

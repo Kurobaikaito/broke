@@ -28,6 +28,8 @@ def evaluate_predictions(
     slippage_bps: float = 2.5,
 ) -> tuple[dict[str, float | int], pd.DataFrame]:
     """Evaluate non-overlapping Top-N portfolios using next-open execution returns."""
+    if horizon <= 0 or top_n <= 0:
+        raise ValueError("horizon and top_n must be positive")
     if initial_capital is not None:
         return evaluate_capital_predictions(
             predictions,
@@ -43,6 +45,11 @@ def evaluate_predictions(
     if transaction_cost_bps < 0:
         raise ValueError("transaction_cost_bps cannot be negative")
     completed = predictions.dropna(subset=["forward_return"]).copy()
+    if "is_scheduled_rebalance" in completed.columns:
+        # walk_forward_predict may append today's cross section so the UI always
+        # has fresh recommendations.  It is not a scheduled historical holding
+        # period and can overlap the preceding H-session portfolio.
+        completed = completed[completed["is_scheduled_rebalance"].eq(True)].copy()  # noqa: E712
     if completed.empty:
         raise ValueError("Predictions do not yet have realized forward returns")
 
@@ -122,6 +129,8 @@ def evaluate_capital_predictions(
     if top_n <= 0 or min(commission_bps, stamp_duty_bps, slippage_bps) < 0:
         raise ValueError("position count and cost rates must be non-negative")
     completed = predictions.dropna(subset=["forward_return", "entry_open", "exit_open"]).copy()
+    if "is_scheduled_rebalance" in completed.columns:
+        completed = completed[completed["is_scheduled_rebalance"].eq(True)].copy()  # noqa: E712
     if completed.empty:
         raise ValueError("Predictions do not yet have realized executable returns")
 
